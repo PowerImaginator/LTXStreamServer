@@ -1,4 +1,6 @@
-# LTX-Video-Inpaint
+# LTXStream Server
+
+This server is intended for use with the LTXStream Client application: https://github.com/PowerImaginator/LTXStreamClient
 
 ## Setup
 
