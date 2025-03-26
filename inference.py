@@ -9,6 +9,7 @@ from typing import Optional, List, Union
 import imageio
 import numpy as np
 import torch
+from einops import rearrange
 from PIL import Image
 from transformers import (
     T5EncoderModel,
@@ -315,10 +316,10 @@ def main():
         help="List of paths to conditioning media (images or videos). Each path will be used as a conditioning item.",
     )
     parser.add_argument(
-        "--conditioning_strengths",
-        type=float,
+        "--conditioning_mask_paths",
+        type=str,
         nargs="*",
-        help="List of conditioning strengths (between 0 and 1) for each conditioning item. Must match the number of conditioning items.",
+        help="List of folders containing conditioning strength masks for each conditioning item. Must match the number of conditioning items.",
     )
     parser.add_argument(
         "--conditioning_start_frames",
@@ -464,7 +465,7 @@ def infer(
     offload_to_cpu: bool,
     text_encoder_model_name_or_path: str,
     conditioning_media_paths: Optional[List[str]] = None,
-    conditioning_strengths: Optional[List[float]] = None,
+    conditioning_mask_paths: Optional[List[str]] = None,
     conditioning_start_frames: Optional[List[int]] = None,
     sampler: Optional[str] = None,
     device: Optional[str] = None,
@@ -483,23 +484,22 @@ def infer(
 
     # Validate conditioning arguments
     if conditioning_media_paths:
-        # Use default strengths of 1.0
-        if not conditioning_strengths:
-            conditioning_strengths = [1.0] * len(conditioning_media_paths)
+        if not conditioning_mask_paths:
+            raise Exception(
+                "Must provide conditioning mask paths matching conditioning items"
+            )
         if not conditioning_start_frames:
             raise ValueError(
                 "If `conditioning_media_paths` is provided, "
                 "`conditioning_start_frames` must also be provided"
             )
-        if len(conditioning_media_paths) != len(conditioning_strengths) or len(
+        if len(conditioning_media_paths) != len(conditioning_mask_paths) or len(
             conditioning_media_paths
         ) != len(conditioning_start_frames):
             raise ValueError(
-                "`conditioning_media_paths`, `conditioning_strengths`, "
+                "`conditioning_media_paths`, `conditioning_mask_paths`, "
                 "and `conditioning_start_frames` must have the same length"
             )
-        if any(s < 0 or s > 1 for s in conditioning_strengths):
-            raise ValueError("All conditioning strengths must be between 0 and 1")
         if any(f < 0 or f >= num_frames for f in conditioning_start_frames):
             raise ValueError(
                 f"All conditioning start frames must be between 0 and {num_frames-1}"
@@ -557,7 +557,7 @@ def infer(
     conditioning_items = (
         prepare_conditioning(
             conditioning_media_paths=conditioning_media_paths,
-            conditioning_strengths=conditioning_strengths,
+            conditioning_mask_paths=conditioning_mask_paths,
             conditioning_start_frames=conditioning_start_frames,
             height=height,
             width=width,
@@ -593,34 +593,38 @@ def infer(
     device = device or get_device()
     generator = torch.Generator(device=device).manual_seed(seed)
 
-    images = pipeline(
-        num_inference_steps=num_inference_steps,
-        num_images_per_prompt=num_images_per_prompt,
-        guidance_scale=guidance_scale,
-        skip_layer_strategy=skip_layer_strategy,
-        skip_block_list=skip_block_list,
-        stg_scale=stg_scale,
-        do_rescaling=stg_rescale != 1,
-        rescaling_scale=stg_rescale,
-        generator=generator,
-        output_type="pt",
-        callback_on_step_end=None,
-        height=height_padded,
-        width=width_padded,
-        num_frames=num_frames_padded,
-        frame_rate=frame_rate,
+    pipeline_args = {
+        "num_inference_steps": num_inference_steps,
+        "num_images_per_prompt": num_images_per_prompt,
+        "guidance_scale": guidance_scale,
+        "skip_layer_strategy": skip_layer_strategy,
+        "skip_block_list": skip_block_list,
+        "stg_scale": stg_scale,
+        "do_rescaling": stg_rescale != 1,
+        "rescaling_scale": stg_rescale,
+        "generator": generator,
+        "output_type": "pt",
+        "callback_on_step_end": None,
+        "height": height_padded,
+        "width": width_padded,
+        "num_frames": num_frames_padded,
+        "frame_rate": frame_rate,
         **sample,
-        conditioning_items=conditioning_items,
-        is_video=True,
-        vae_per_channel_normalize=True,
-        image_cond_noise_scale=image_cond_noise_scale,
-        decode_timestep=decode_timestep,
-        decode_noise_scale=decode_noise_scale,
-        mixed_precision=(precision == "mixed_precision"),
-        offload_to_cpu=offload_to_cpu,
-        device=device,
-        enhance_prompt=enhance_prompt,
-    ).images
+        "conditioning_items": conditioning_items,
+        "is_video": True,
+        "vae_per_channel_normalize": True,
+        "image_cond_noise_scale": image_cond_noise_scale,
+        "decode_timestep": decode_timestep,
+        "decode_noise_scale": decode_noise_scale,
+        "mixed_precision": (precision == "mixed_precision"),
+        "offload_to_cpu": offload_to_cpu,
+        "device": device,
+        "enhance_prompt": enhance_prompt,
+    }
+
+    pipeline.update_prompt(**pipeline_args)
+    pipeline.update_conditioning(**pipeline_args)
+    images = pipeline(**pipeline_args).images
 
     # Crop the padded images to the desired resolution and number of frames
     (pad_left, pad_right, pad_top, pad_bottom) = padding
@@ -670,7 +674,7 @@ def infer(
 
 def prepare_conditioning(
     conditioning_media_paths: List[str],
-    conditioning_strengths: List[float],
+    conditioning_mask_paths: List[str],
     conditioning_start_frames: List[int],
     height: int,
     width: int,
@@ -682,7 +686,7 @@ def prepare_conditioning(
 
     Args:
         conditioning_media_paths: List of paths to conditioning media (images or videos)
-        conditioning_strengths: List of conditioning strengths for each media item
+        conditioning_mask_paths: List of conditioning masks for each media item
         conditioning_start_frames: List of frame indices where each item should be applied
         height: Height of the output frames
         width: Width of the output frames
@@ -694,12 +698,13 @@ def prepare_conditioning(
         A list of ConditioningItem objects.
     """
     conditioning_items = []
-    for path, strength, start_frame in zip(
-        conditioning_media_paths, conditioning_strengths, conditioning_start_frames
+    for path, mask_path, start_frame in zip(
+        conditioning_media_paths, conditioning_mask_paths, conditioning_start_frames
     ):
         # Check if the path points to an image or video
         is_video = any(
-            path.lower().endswith(ext) for ext in [".mp4", ".avi", ".mov", ".mkv"]
+            path.lower().endswith(ext)
+            for ext in [".mp4", ".avi", ".mov", ".mkv", ".webm"]
         )
 
         if is_video:
@@ -726,8 +731,22 @@ def prepare_conditioning(
 
             # Stack frames along the temporal dimension
             video_tensor = torch.cat(frames, dim=2)
+
+            mask_frames = []
+            num_mask_frames = num_input_frames // 8 + 1
+            for mask_frame_i in range(num_mask_frames):
+                mask_frame_img = Image.open(
+                    os.path.join(mask_path, "{}.png".format(str(mask_frame_i)))
+                ).convert("RGB")
+                mask_frame_img = np.array(mask_frame_img).astype(np.float32) / 255.0
+                mask_frame_img = mask_frame_img.mean(axis=2, keepdims=True)
+                mask_frames.append(mask_frame_img)
+            mask_frames = torch.Tensor(np.array(mask_frames)).to(
+                device=get_device(), dtype=torch.bfloat16
+            )
+            mask_frames = rearrange(mask_frames, "f h w c -> 1 c f h w")
             conditioning_items.append(
-                ConditioningItem(video_tensor, start_frame, strength)
+                ConditioningItem(video_tensor, start_frame, mask_frames)
             )
         else:  # Input image
             frame_tensor = load_image_to_tensor_with_resize_and_crop(
@@ -735,7 +754,11 @@ def prepare_conditioning(
             )
             frame_tensor = torch.nn.functional.pad(frame_tensor, padding)
             conditioning_items.append(
-                ConditioningItem(frame_tensor, start_frame, strength)
+                ConditioningItem(
+                    frame_tensor,
+                    start_frame,
+                    torch.ones((1, frame_tensor.shape[3], frame_tensor.shape[4])),
+                )
             )
 
     return conditioning_items

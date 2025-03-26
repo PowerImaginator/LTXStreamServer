@@ -1,16 +1,7 @@
-[build-system]
-requires = ["setuptools>=42", "wheel"]
-build-backend = "setuptools.build_meta"
-
 [project]
-name = "ltx-video"
-version = "0.1.2"
-description = "A package for LTX-Video model"
-authors = [
-    { name = "Sapir Weissbuch", email = "sapir@lightricks.com" }
-]
+name = "ltx-video-inpaint"
+version = "0.1.0"
 requires-python = ">=3.10"
-readme = "README.md"
 classifiers = [
     "Programming Language :: Python :: 3",
     "Operating System :: OS Independent"
@@ -22,16 +13,10 @@ dependencies = [
     "sentencepiece>=0.1.96",
     "huggingface-hub~=0.25.2",
     "einops",
-    "timm"
-]
-
-[project.optional-dependencies]
-# Instead of thinking of them as optional, think of them as specific modes
-inference-script = [
+    "timm",
     "accelerate",
     "matplotlib",
-    "imageio[ffmpeg]"
-]
-test = [
-    "pytest",
+    "imageio[ffmpeg]",
+    "fastapi[standard]>=0.115.11",
+    "msgpack>=1.1.0",
 ]
