@@ -260,7 +260,7 @@ class LTXVideoPipeline(DiffusionPipeline):
 
         self.cached_latents = None
         self.cached_conditioning_mask = None
-        self.cached_image = None
+        # self.cached_image = None
 
     def mask_text_embeddings(self, emb, mask):
         if emb.shape[0] == 1:
@@ -1047,19 +1047,21 @@ class LTXVideoPipeline(DiffusionPipeline):
             )
             image = self.image_processor.postprocess(image, output_type=output_type)
 
-            self.cached_image = image
+            # self.cached_image = image
 
         else:
             image = latents
 
-            self.cached_image = None
+            # self.cached_image = None
 
+        """
         self.cached_latents = latents
         self.cached_conditioning_mask = torch.ones(
             (latents.shape[0], 1, latents.shape[2], latents.shape[3], latents.shape[4]),
             dtype=torch.float32,
             device=latents.device,
         )
+        """
 
         # Offload all models
         self.maybe_free_model_hooks()
@@ -1225,7 +1227,6 @@ class LTXVideoPipeline(DiffusionPipeline):
         offload_to_cpu: bool = False,
         enhance_prompt: bool = False,
         text_encoder_max_tokens: int = 256,
-        pop_latents: Optional[int] = None,
         **kwargs,
     ):
         device = self._execution_device
@@ -1258,75 +1259,17 @@ class LTXVideoPipeline(DiffusionPipeline):
         )
 
         # Prepare the initial random latents tensor, shape = (b, c, f, h, w)
-        if self.cached_latents is None or latent_shape != self.cached_latents.shape:
-            latents = self.prepare_latents(
-                latent_shape=latent_shape,
-                dtype=prompt_embeds_batch.dtype,
-                device=device,
-                generator=generator,
-            )
-        else:
-            latents = self.cached_latents
-
-        if self.cached_conditioning_mask is None:
-            conditioning_mask = torch.zeros(
-                (latent_shape[0], 1, latent_shape[2], latent_shape[3], latent_shape[4]),
-                dtype=torch.float32,
-                device=latents.device,
-            )
-        else:
-            conditioning_mask = self.cached_conditioning_mask
-
-        if pop_latents is not None:
-            # first_frame = vae_encode(
-            #     self.cached_image[:, :, (pop_latents * 8) : (pop_latents * 8 + 1), :, :]
-            #     * 2.0
-            #     - 1.0,
-            #     self.vae,
-            #     vae_per_channel_normalize=vae_per_channel_normalize,
-            # ).to(dtype=self.transformer.dtype)
-            # latents[:, :, :-pop_latents] = latents[:, :, pop_latents:].clone()
-            # latents[:, :, 0] = first_frame[:, :, 0]
-            # latents[:, :, -pop_latents:] = self.prepare_latents(
-            #     latent_shape=(
-            #         latent_shape[0],
-            #         latent_shape[1],
-            #         pop_latents,
-            #         latent_shape[3],
-            #         latent_shape[4],
-            #     ),
-            #     dtype=prompt_embeds_batch.dtype,
-            #     device=device,
-            #     generator=generator,
-            # )
-
-            re_encoded = vae_encode(
-                self.cached_image[:, :, (pop_latents * 8) :, :, :] * 2.0 - 1.0,
-                self.vae,
-                vae_per_channel_normalize=vae_per_channel_normalize,
-            ).to(dtype=self.transformer.dtype)
-            latents[:, :, :pop_latents] = re_encoded
-            latents[:, :, -pop_latents:] = self.prepare_latents(
-                latent_shape=(
-                    latent_shape[0],
-                    latent_shape[1],
-                    pop_latents,
-                    latent_shape[3],
-                    latent_shape[4],
-                ),
-                dtype=prompt_embeds_batch.dtype,
-                device=device,
-                generator=generator,
-            )
-
-            conditioning_mask[:, :, :-pop_latents] = conditioning_mask[
-                :, :, pop_latents:
-            ].clone()
-            conditioning_mask[:, :, -pop_latents:] = torch.zeros(
-                (latent_shape[0], 1, pop_latents, latent_shape[3], latent_shape[4]),
-                dtype=torch.float32,
-                device=latents.device,
-            )
+        latents = self.prepare_latents(
+            latent_shape=latent_shape,
+            dtype=prompt_embeds_batch.dtype,
+            device=device,
+            generator=generator,
+        )
+        conditioning_mask = torch.zeros(
+            (latent_shape[0], 1, latent_shape[2], latent_shape[3], latent_shape[4]),
+            dtype=torch.float32,
+            device=latents.device,
+        )
 
         # Update the latents with the conditioning items and patchify them into (b, n, c)
         latents, conditioning_mask = self.prepare_conditioning(

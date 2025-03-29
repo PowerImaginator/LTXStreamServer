@@ -108,21 +108,11 @@ class SessionProcess:
         return {"reply_to": message["id"], "type": "READY"}
 
     def _update_conditioning(self, message):
-        if "pop_latents" in message:
-            pop_latents = message["pop_latents"]
-        else:
-            pop_latents = None
-        self.session.update_conditioning(pop_latents=pop_latents)
+        self.session.update_conditioning()
         return {"reply_to": message["id"], "type": "READY"}
 
     def _generate(self, message):
         video = self.session.generate()
-        self.session.set_pipeline_args(
-            conditioning_videos=None,
-            conditioning_masks=None,
-            conditioning_start_frames=None,
-        )
-
         video_np = video.permute(1, 2, 3, 0).cpu().float().numpy()
         video_np = (video_np * 255).astype(np.uint8)
         out_io = io.BytesIO()
