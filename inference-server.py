@@ -94,22 +94,22 @@ class SessionProcess:
             prompt_enhancer_image_caption_model_name_or_path=None,
             prompt_enhancer_llm_model_name_or_path=None,
         )
-        return {"reply_to": message["id"], "type": "READY"}
+        return {"type": "READY"}
 
     def _set_pipeline_args(self, message):
         if "seed" in message:
             seed_everything(message["seed"])
             self.generator.manual_seed(message["seed"])
         self.session.set_pipeline_args(**message["pipeline_args"])
-        return {"reply_to": message["id"], "type": "READY"}
+        return {"type": "READY"}
 
     def _update_prompt(self, message):
         self.session.update_prompt()
-        return {"reply_to": message["id"], "type": "READY"}
+        return {"type": "READY"}
 
     def _update_conditioning(self, message):
         self.session.update_conditioning()
-        return {"reply_to": message["id"], "type": "READY"}
+        return {"type": "READY"}
 
     def _generate(self, message):
         video = self.session.generate()
@@ -123,7 +123,6 @@ class SessionProcess:
                 video.append_data(frame)
 
         return {
-            "reply_to": message["id"],
             "type": "OUTPUT",
             "video_bytes": out_io.getvalue(),
         }
