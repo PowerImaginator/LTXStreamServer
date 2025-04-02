@@ -43,6 +43,10 @@ class SessionProcess:
         self.receive_queue = multiprocessing.Queue()
         self.send_queue = multiprocessing.Queue()
 
+        self.device = None
+        self.generator = None
+        self.session = None
+
         self._process = multiprocessing.Process(
             target=self._run,
             daemon=True,
@@ -83,17 +87,20 @@ class SessionProcess:
             self.send_queue.put(result)
 
     def _create_pipeline(self, message):
-        self.device = get_device()
-        self.generator = torch.Generator(device=self.device)
-        self.session = LTXVideoSession(
-            ckpt_path="checkpoints/ltx-video-2b-v0.9.5.safetensors",
-            precision="bfloat16",
-            text_encoder_model_name_or_path="PixArt-alpha/PixArt-XL-2-1024-MS",
-            device=self.device,
-            enhance_prompt=False,
-            prompt_enhancer_image_caption_model_name_or_path=None,
-            prompt_enhancer_llm_model_name_or_path=None,
-        )
+        if self.device is None:
+            self.device = get_device()
+        if self.generator is None:
+            self.generator = torch.Generator(device=self.device)
+        if self.session is None:
+            self.session = LTXVideoSession(
+                ckpt_path="checkpoints/ltx-video-2b-v0.9.5.safetensors",
+                precision="bfloat16",
+                text_encoder_model_name_or_path="PixArt-alpha/PixArt-XL-2-1024-MS",
+                device=self.device,
+                enhance_prompt=False,
+                prompt_enhancer_image_caption_model_name_or_path=None,
+                prompt_enhancer_llm_model_name_or_path=None,
+            )
         return {"type": "READY"}
 
     def _set_pipeline_args(self, message):

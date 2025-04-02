@@ -1,8 +1,9 @@
+import io
 import os
 from pathlib import Path
 from typing import Optional, List, Union, BinaryIO
 
-import imageio
+import av
 import numpy as np
 import torch
 from einops import rearrange
@@ -117,20 +118,16 @@ def load_conditioning_items(
     for media_item, mask_items, start_frame in zip(
         conditioning_videos, conditioning_masks, conditioning_start_frames
     ):
-        reader = imageio.get_reader(media_item)
-        num_input_frames = reader.count_frames()
-
         frames = []
-        for i in range(num_input_frames):
-            frame = Image.fromarray(reader.get_data(i))
-            frame_tensor = load_image_to_tensor(frame)
+        container = av.open(io.BytesIO(media_item))
+        for frame in container.decode(video=0):
+            frame_tensor = load_image_to_tensor(frame.to_image())
             frames.append(frame_tensor)
-        reader.close()
         video_tensor = torch.cat(frames, dim=2)
 
         mask_frames = []
         for mask_item in mask_items:
-            mask_img = Image.open(mask_item).convert("RGB")
+            mask_img = Image.open(io.BytesIO(mask_item)).convert("RGB")
             mask_img = np.array(mask_img).astype(np.float32) / 255.0
             mask_img = mask_img.mean(axis=2, keepdims=True)
             mask_frames.append(mask_img)

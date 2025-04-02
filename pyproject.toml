@@ -19,4 +19,5 @@ dependencies = [
     "imageio[ffmpeg]",
     "fastapi[standard]>=0.115.11",
     "msgpack>=1.1.0",
+    "av>=14.2.0",
 ]
