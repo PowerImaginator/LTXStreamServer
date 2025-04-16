@@ -6,8 +6,9 @@ sys.path.append(".")
 import io
 import random
 import asyncio
-import threading
+import atexit
 import multiprocessing
+from concurrent.futures import ProcessPoolExecutor
 
 import numpy as np
 import torch
@@ -18,6 +19,18 @@ from fastapi import FastAPI, WebSocket, WebSocketDisconnect
 from fastapi.middleware.cors import CORSMiddleware
 
 from LTXVideoSession import LTXVideoSession
+
+
+# https://stackoverflow.com/a/56944547
+async def multiprocessing_queue_get_async(queue: multiprocessing.Queue):
+    executor = ProcessPoolExecutor(max_workers=1)
+    loop = asyncio.get_running_loop()
+    return await loop.run_in_executor(executor, queue.get)
+
+
+@atexit.register
+def kill_children():
+    [p.kill() for p in multiprocessing.active_children()]
 
 
 def get_device():
@@ -40,8 +53,9 @@ def seed_everything(seed: int):
 
 class SessionProcess:
     def __init__(self):
-        self.receive_queue = multiprocessing.Queue()
-        self.send_queue = multiprocessing.Queue()
+        manager = multiprocessing.Manager()
+        self.receive_queue = manager.Queue()
+        self.send_queue = manager.Queue()
 
         self.device = None
         self.generator = None
@@ -149,15 +163,19 @@ app.add_middleware(
 )
 
 
-def send_message_thread_target(websocket: WebSocket, session_process: SessionProcess):
+async def send_message_thread_task(
+    websocket: WebSocket, session_process: SessionProcess
+):
     while True:
-        message = session_process.send_queue.get()
+        message = await multiprocessing_queue_get_async(session_process.send_queue)
         if message["type"] == "__INFERENCE_SERVER_TERMINATE__":
             break
         else:
-            loop = asyncio.new_event_loop()
-            loop.run_until_complete(websocket.send_bytes(msgpack.packb(message)))
-            loop.close()
+            await websocket.send_bytes(msgpack.packb(message))
+
+
+# https://docs.python.org/3/library/asyncio-task.html#asyncio.create_task
+background_tasks = set()
 
 
 @app.websocket("/ws")
@@ -165,10 +183,10 @@ async def websocket_endpoint(websocket: WebSocket):
     await websocket.accept()
 
     session_process = SessionProcess()
-    send_message_thread = threading.Thread(
-        target=send_message_thread_target, args=[websocket, session_process]
-    )
-    send_message_thread.start()
+
+    task = asyncio.create_task(send_message_thread_task(websocket, session_process))
+    background_tasks.add(task)
+    task.add_done_callback(background_tasks.discard)
 
     try:
         while True:
@@ -178,7 +196,6 @@ async def websocket_endpoint(websocket: WebSocket):
         pass
 
     session_process.terminate()
-    send_message_thread.join()
 
 
 if __name__ == "__main__":
