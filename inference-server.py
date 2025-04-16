@@ -124,7 +124,10 @@ class SessionProcess:
         video_np = (video_np * 255).astype(np.uint8)
         out_io = io.BytesIO()
         with imageio.get_writer(
-            out_io, format="mp4", fps=self.session.pipeline_args["frame_rate"]
+            out_io,
+            format="mp4",
+            quality=10,
+            fps=self.session.pipeline_args["frame_rate"],
         ) as video:
             for frame in video_np:
                 video.append_data(frame)
