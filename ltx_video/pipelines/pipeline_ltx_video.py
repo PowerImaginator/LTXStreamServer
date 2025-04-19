@@ -237,6 +237,7 @@ class LTXVideoPipeline(DiffusionPipeline):
         prompt_enhancer_image_caption_processor: AutoProcessor,
         prompt_enhancer_llm_model: AutoModelForCausalLM,
         prompt_enhancer_llm_tokenizer: AutoTokenizer,
+        allowed_inference_steps: Optional[List[float]] = None,
     ):
         super().__init__()
 
@@ -257,6 +258,8 @@ class LTXVideoPipeline(DiffusionPipeline):
             self.vae
         )
         self.image_processor = VaeImageProcessor(vae_scale_factor=self.vae_scale_factor)
+
+        self.allowed_inference_steps = allowed_inference_steps
 
         self.cached_latents = None
         self.cached_conditioning_mask = None
@@ -687,6 +690,7 @@ class LTXVideoPipeline(DiffusionPipeline):
         offload_to_cpu: bool = False,
         enhance_prompt: bool = False,
         text_encoder_max_tokens: int = 256,
+        stochastic_sampling: bool = False,
         **kwargs,
     ) -> Union[ImagePipelineOutput, Tuple]:
         """
@@ -755,6 +759,8 @@ class LTXVideoPipeline(DiffusionPipeline):
                 If set to `True`, the prompt is enhanced using a LLM model.
             text_encoder_max_tokens (`int`, *optional*, defaults to `256`):
                 The maximum number of tokens to use for the text encoder.
+            stochastic_sampling (`bool`, *optional*, defaults to `False`):
+                If set to `True`, the sampling is stochastic. If set to `False`, the sampling is deterministic.
 
         Examples:
 
@@ -864,6 +870,11 @@ class LTXVideoPipeline(DiffusionPipeline):
             timesteps,
             **retrieve_timesteps_kwargs,
         )
+        if self.allowed_inference_steps is not None:
+            for timestep in [round(x, 4) for x in timesteps.tolist()]:
+                assert (
+                    timestep in self.allowed_inference_steps
+                ), f"Invalid inference timestep {timestep}. Allowed timesteps are {self.allowed_inference_steps}."
 
         # 6. Prepare extra step kwargs. TODO: Logic should ideally just be moved out of the pipeline
         extra_step_kwargs = self.prepare_extra_step_kwargs(generator, eta)
@@ -993,6 +1004,7 @@ class LTXVideoPipeline(DiffusionPipeline):
                     orig_conditioning_mask,
                     t,
                     extra_step_kwargs,
+                    stochastic_sampling=stochastic_sampling,
                 )
 
                 # call the callback, if provided
@@ -1295,6 +1307,7 @@ class LTXVideoPipeline(DiffusionPipeline):
         t: float,
         extra_step_kwargs,
         t_eps=1e-6,
+        stochastic_sampling=False,
     ):
         """
         Perform the denoising step for the required tokens, based on the current timestep and
@@ -1311,6 +1324,7 @@ class LTXVideoPipeline(DiffusionPipeline):
             latents,
             **extra_step_kwargs,
             return_dict=False,
+            stochastic_sampling=stochastic_sampling,
         )[0]
 
         if conditioning_mask is None:
@@ -1384,7 +1398,7 @@ class LTXVideoPipeline(DiffusionPipeline):
                     media_item.to(dtype=self.vae.dtype, device=self.vae.device),
                     self.vae,
                     vae_per_channel_normalize=vae_per_channel_normalize,
-                ).to(dtype=self.transformer.dtype)
+                ).to(dtype=init_latents.dtype)
 
                 # Handle the different conditioning cases
                 if media_frame_number == 0:
