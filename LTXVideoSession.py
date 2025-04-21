@@ -1,5 +1,6 @@
 import io
 import os
+import json
 from pathlib import Path
 from typing import Optional, List, Union, BinaryIO
 
@@ -7,6 +8,7 @@ import av
 import numpy as np
 import torch
 from einops import rearrange
+from safetensors import safe_open
 from PIL import Image
 from transformers import (
     T5EncoderModel,
@@ -40,6 +42,13 @@ def create_ltx_video_pipeline(
     assert os.path.exists(
         ckpt_path
     ), f"Ckpt path provided (--ckpt_path) {ckpt_path} does not exist"
+
+    with safe_open(ckpt_path, framework="pt") as f:
+        metadata = f.metadata()
+        config_str = metadata.get("config")
+        configs = json.loads(config_str)
+        allowed_inference_steps = configs.get("allowed_inference_steps", None)
+
     vae = CausalVideoAutoencoder.from_pretrained(ckpt_path)
     transformer = Transformer3DModel.from_pretrained(ckpt_path)
 
@@ -100,6 +109,7 @@ def create_ltx_video_pipeline(
         "prompt_enhancer_image_caption_processor": prompt_enhancer_image_caption_processor,
         "prompt_enhancer_llm_model": prompt_enhancer_llm_model,
         "prompt_enhancer_llm_tokenizer": prompt_enhancer_llm_tokenizer,
+        "allowed_inference_steps": allowed_inference_steps,
     }
 
     pipeline = LTXVideoPipeline(**submodel_dict)
@@ -108,7 +118,7 @@ def create_ltx_video_pipeline(
 
 
 def load_conditioning_items(
-    conditioning_videos: List[Union[str, bytes, os.PathLike, BinaryIO]],
+    conditioning_videos: List[List[Union[str, bytes, os.PathLike, BinaryIO]]],
     conditioning_masks: List[List[Union[str, bytes, os.PathLike, BinaryIO]]],
     conditioning_start_frames: List[int],
     device: Optional[str] = None,
@@ -119,15 +129,20 @@ def load_conditioning_items(
         conditioning_videos, conditioning_masks, conditioning_start_frames
     ):
         frames = []
-        container = av.open(io.BytesIO(media_item))
-        for frame in container.decode(video=0):
-            frame_tensor = load_image_to_tensor(frame.to_image())
-            frames.append(frame_tensor)
+        for frame in media_item:
+            if isinstance(frame, str) or isinstance(frame, os.PathLike):
+                img = Image.open(frame).convert("RGB")
+            else:
+                img = Image.open(io.BytesIO(frame)).convert("RGB")
+            frames.append(load_image_to_tensor(img))
         video_tensor = torch.cat(frames, dim=2)
 
         mask_frames = []
         for mask_item in mask_items:
-            mask_img = Image.open(io.BytesIO(mask_item)).convert("RGB")
+            if isinstance(mask_item, str) or isinstance(mask_item, os.PathLike):
+                mask_img = Image.open(mask_item).convert("RGB")
+            else:
+                mask_img = Image.open(io.BytesIO(mask_item)).convert("RGB")
             mask_img = np.array(mask_img).astype(np.float32) / 255.0
             mask_img = mask_img.mean(axis=2, keepdims=True)
             mask_frames.append(mask_img)
@@ -211,6 +226,7 @@ class LTXVideoSession:
             "prompt_attention_mask": None,
             "negative_prompt": "",
             "negative_prompt_attention_mask": None,
+            "stochastic_sampling": False,
         }
 
     def set_pipeline_args(
@@ -227,7 +243,7 @@ class LTXVideoSession:
         num_frames: Optional[int] = None,
         frame_rate: Optional[int] = None,
         conditioning_videos: Optional[
-            List[Union[str, bytes, os.PathLike, BinaryIO]]
+            List[List[Union[str, bytes, os.PathLike, BinaryIO]]]
         ] = None,
         conditioning_masks: Optional[
             List[List[Union[str, bytes, os.PathLike, BinaryIO]]]
@@ -242,6 +258,7 @@ class LTXVideoSession:
         enhance_prompt: Optional[bool] = None,
         prompt: Optional[str] = None,
         negative_prompt: Optional[str] = None,
+        stochastic_sampling: Optional[bool] = None,
     ):
         args = locals().copy()
         for arg_name in args:
