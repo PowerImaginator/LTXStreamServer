@@ -11,6 +11,12 @@ from celery import Celery
 from LTXVideoSession import LTXVideoSession
 
 app = Celery("ltxstream-tasks", backend="rpc://", broker="pyamqp://")
+app.conf.update(
+    event_serializer="pickle",
+    task_serializer="pickle",
+    result_serializer="pickle",
+    accept_content=["pickle"],
+)
 
 
 def get_device():
