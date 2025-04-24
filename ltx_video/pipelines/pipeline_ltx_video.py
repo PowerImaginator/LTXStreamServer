@@ -1245,6 +1245,7 @@ class LTXVideoPipeline(DiffusionPipeline):
         enhance_prompt: bool = False,
         text_encoder_max_tokens: int = 256,
         pop_latents: Optional[int] = None,
+        condition_all_non_popped_latents: Optional[bool] = False,
         **kwargs,
     ):
         device = self._execution_device
@@ -1294,7 +1295,23 @@ class LTXVideoPipeline(DiffusionPipeline):
                 device=latents.device,
             )
         else:
-            conditioning_mask = self.cached_conditioning_mask
+            if condition_all_non_popped_latents and not conditioning_items:
+                # The conditioning mask pop_latents reset to zero in the "pop_latents is not None" branch will override this,
+                # and the values of mask and media in conditioning_items will override even that conditioning_mask
+                conditioning_mask = torch.ones(
+                    (
+                        latent_shape[0],
+                        1,
+                        latent_shape[2],
+                        latent_shape[3],
+                        latent_shape[4],
+                    ),
+                    dtype=torch.float32,
+                    device=latents.device,
+                )
+            else:
+                # In case the user doesn't provide a conditioning mask (e.g. just wants to randomize and get another generation from the same cached_latents as before)
+                conditioning_mask = self.cached_conditioning_mask
 
         if pop_latents is not None:
             # first_frame = vae_encode(

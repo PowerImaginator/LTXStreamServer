@@ -283,8 +283,16 @@ class LTXVideoSession:
     def update_prompt(self):
         self.pipeline.update_prompt(**self.pipeline_args)
 
-    def update_conditioning(self, pop_latents: Optional[int] = None):
-        self.pipeline.update_conditioning(**self.pipeline_args, pop_latents=pop_latents)
+    def update_conditioning(
+        self,
+        pop_latents: Optional[int] = None,
+        condition_all_non_popped_latents: Optional[bool] = False,
+    ):
+        self.pipeline.update_conditioning(
+            **self.pipeline_args,
+            pop_latents=pop_latents,
+            condition_all_non_popped_latents=condition_all_non_popped_latents,
+        )
 
     def generate(self):
         return self.pipeline(**self.pipeline_args).images[0]
