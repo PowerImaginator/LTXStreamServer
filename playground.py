@@ -90,7 +90,7 @@ if __name__ == "__main__":
                 "frame_rate": 30,
                 "num_inference_steps": 8,
                 "prompt": "A clear, turquoise river flows through a rocky canyon, cascading over a small waterfall and forming a pool of water at the bottom.The river is the main focus of the scene, with its clear water reflecting the surrounding trees and rocks. The canyon walls are steep and rocky, with some vegetation growing on them. The trees are mostly pine trees, with their green needles contrasting with the brown and gray rocks. The overall tone of the scene is one of peace and tranquility.",
-                "negative_prompt": "",
+                "negative_prompt": "worst quality, inconsistent motion, blurry, jittery, distorted, text, watermark",
                 "image_cond_noise_scale": 0.0,
                 "decode_timestep": 0.05,
                 "decode_noise_scale": 0.025,
